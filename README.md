@@ -1,4 +1,4 @@
-# mimo-cli
+# mimo-farmer
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -29,8 +29,8 @@ Automated Xiaomi MiMo account creation CLI tool with referral bonuses.
 
 ```bash
 # Clone the repo
-git clone https://github.com/rapoii/mimo-cli.git
-cd mimo-cli
+git clone https://github.com/rapoii/mimo-farmer.git
+cd mimo-farmer
 
 # Install
 pip install -e .
@@ -49,37 +49,37 @@ pip install -r requirements.txt
 ### Create single account
 
 ```bash
-mimo create
+mimo-farmer create
 ```
 
 ### Create multiple accounts
 
 ```bash
-mimo create --count 5
+mimo-farmer create --count 5
 ```
 
 ### Custom referral code
 
 ```bash
-mimo create --referral ABC123
+mimo-farmer create --referral ABC123
 ```
 
 ### Fast mode (reduced delays)
 
 ```bash
-mimo create --fast
+mimo-farmer create --fast
 ```
 
 ### Parallel browser instances
 
 ```bash
-mimo create --parallel 2
+mimo-farmer create --parallel 2
 ```
 
 ### Combine options
 
 ```bash
-mimo create --count 10 --parallel 3 --fast --referral MYCODE
+mimo-farmer create --count 10 --parallel 3 --fast --referral MYCODE
 ```
 
 ### List created accounts
@@ -118,7 +118,7 @@ mimo export --output my_accounts.json # Custom output path
 ## Project Structure
 
 ```
-mimo-cli/
+mimo-farmer/
 ├── README.md              # This file
 ├── LICENSE                # MIT License
 ├── .gitignore

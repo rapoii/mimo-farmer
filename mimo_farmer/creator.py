@@ -21,14 +21,14 @@ import time
 
 from patchright.async_api import async_playwright
 
-from mimo_cli.config import (
+from mimo_farmer.config import (
     DEFAULT_PASSWORD, DEFAULT_REFERRAL_CODE, SIGNUP_URL,
     BALANCE_URL, API_KEYS_URL, LOGOUT_URL, ACCOUNTS_DIR,
     HUMAN_DELAY_MIN_MS, HUMAN_DELAY_MAX_MS,
     FAST_DELAY_MIN_MS, FAST_DELAY_MAX_MS, FAST_MODE_MULTIPLIER,
 )
-from mimo_cli.captcha import solve_recaptcha
-from mimo_cli.email_handler import random_email, wait_for_otp
+from mimo_farmer.captcha import solve_recaptcha
+from mimo_farmer.email_handler import random_email, wait_for_otp
 
 
 class Timer:

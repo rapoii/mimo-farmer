@@ -6,7 +6,7 @@ import re
 import string
 import time
 
-from mimo_cli.config import EMAIL_DOMAINS, OTP_TIMEOUT_SECONDS, OTP_POLL_INTERVAL_SECONDS
+from mimo_farmer.config import EMAIL_DOMAINS, OTP_TIMEOUT_SECONDS, OTP_POLL_INTERVAL_SECONDS
 
 
 def random_email() -> tuple[str, str, str]:

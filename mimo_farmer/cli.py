@@ -16,8 +16,8 @@ import json
 import os
 import sys
 
-from mimo_cli.config import DEFAULT_REFERRAL_CODE, ACCOUNTS_DIR
-from mimo_cli import __version__
+from mimo_farmer.config import DEFAULT_REFERRAL_CODE, ACCOUNTS_DIR
+from mimo_farmer import __version__
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,7 +112,7 @@ examples:
 
 def cmd_create(args) -> int:
     """Handle `mimo create` command."""
-    from mimo_cli.creator import create_account
+    from mimo_farmer.creator import create_account
 
     count = args.count
     referral = args.referral
@@ -131,7 +131,7 @@ def cmd_create(args) -> int:
 
 def _run_sequential(count: int, referral: str, fast: bool) -> int:
     """Create accounts one at a time."""
-    from mimo_cli.creator import create_account
+    from mimo_farmer.creator import create_account
 
     results = []
     for i in range(count):
@@ -159,7 +159,7 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
 
 def _run_parallel(count: int, referral: str, fast: bool, parallel: int) -> int:
     """Create accounts in parallel batches."""
-    from mimo_cli.creator import create_account
+    from mimo_farmer.creator import create_account
 
     async def run_batch(batch_size: int):
         tasks = [

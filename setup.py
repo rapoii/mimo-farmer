@@ -1,15 +1,15 @@
-"""Setup script for mimo-cli."""
+"""Setup script for mimo-farmer."""
 
 from setuptools import setup, find_packages
 
 setup(
-    name="mimo-cli",
+    name="mimo-farmer",
     version="1.0.0",
     description="Automated Xiaomi MiMo account creation CLI tool with referral bonuses",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="rapoii",
-    url="https://github.com/rapoii/mimo-cli",
+    url="https://github.com/rapoii/mimo-farmer",
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
@@ -19,7 +19,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "mimo=mimo_cli.cli:main",
+            "mimo=mimo_farmer.cli:main",
         ],
     },
     classifiers=[

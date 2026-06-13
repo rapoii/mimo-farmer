@@ -13,7 +13,7 @@ import time
 
 import speech_recognition as sr
 
-from mimo_cli.config import AUDIO_DIR, CAPTCHA_MAX_RETRIES
+from mimo_farmer.config import AUDIO_DIR, CAPTCHA_MAX_RETRIES
 
 
 # Word-to-digit normalization map
