@@ -18,12 +18,18 @@ env/
 *.swp
 *.swo
 
-# Accounts (sensitive data)
+# Accounts (SENSITIVE — never commit!)
 accounts/
 
-# Audio cache
+# Audio cache (CAPTCHA audio files)
 .audio_cache/
 audio/
+*.mp3
+*.wav
+
+# Audit/internal docs (not for public)
+WORKFLOW_AUDIT*.md
+MANUAL_WORKFLOW_AUDIT*.md
 
 # OS
 .DS_Store
@@ -32,5 +38,3 @@ Thumbs.db
 # Environment
 .env
 .env.local
-*.mp3
-*.wav
