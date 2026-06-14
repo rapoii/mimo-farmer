@@ -6,6 +6,7 @@ Commands:
   mimo create --referral CODE  Custom referral code
   mimo create --fast       Reduced delays
   mimo create --parallel 2 Parallel browser instances
+  mimo create --continuous Keep creating until risk control
   mimo accounts            List created accounts
   mimo export              Export all credentials to single file
 """
@@ -34,6 +35,7 @@ examples:
   mimo create --referral ABC123 Custom referral code
   mimo create --fast            Reduced delays for faster creation
   mimo create --parallel 2      2 parallel browser instances
+  mimo create --continuous      Keep creating until risk control
   mimo create --count 10 --parallel 3 --fast
   mimo accounts                 List all created accounts
   mimo export                   Export all credentials to file
@@ -80,6 +82,11 @@ examples:
         metavar="N",
         help="Number of parallel browser instances (default: 1)",
     )
+    p_create.add_argument(
+        "--continuous", "--auto", "-c",
+        action="store_true",
+        help="Keep creating accounts until risk control is detected (no --count needed)",
+    )
 
     # accounts
     sub.add_parser(
@@ -119,6 +126,18 @@ def cmd_create(args) -> int:
     count = args.count
     fast = args.fast
     parallel = args.parallel
+    continuous = args.continuous
+
+    # --continuous and --parallel don't mix
+    if continuous and parallel > 1:
+        print("  [!] --continuous and --parallel cannot be used together.")
+        print("  [!] Continuous mode runs sequentially until risk control.")
+        return 1
+
+    # --continuous and --count don't mix
+    if continuous and count is not None:
+        print("  [!] --continuous ignores --count. Remove --count or pick one.")
+        return 1
 
     # Interactive prompts — only if args not provided via CLI
     if not referral:
@@ -127,6 +146,13 @@ def cmd_create(args) -> int:
             if referral:
                 break
             print("  [!] Kode referral wajib diisi!")
+
+    # Continuous mode: no count needed
+    if continuous:
+        print(f"\nMiMo CLI v{__version__}")
+        print(f"CONTINUOUS MODE | Referral: {referral} | Fast: {fast}")
+        print("Creating accounts until risk control detected (Ctrl+C to stop)\n")
+        return _run_continuous(referral, fast)
 
     if not count or count < 1:
         while True:
@@ -189,6 +215,78 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
     print(f"  Summary: {success}/{count} accounts created")
     print(f"{'=' * 60}")
     return 0 if success > 0 else 1
+
+
+def _run_continuous(referral: str, fast: bool) -> int:
+    """Create accounts one by one until risk control is detected."""
+    from mimo_farmer.creator import create_account
+
+    results = []
+    failures = 0
+    account_num = 0
+    last_success = None
+
+    try:
+        while True:
+            account_num += 1
+            print(f"\n{'#' * 60}")
+            print(f"  Account #{account_num}")
+            print(f"{'#' * 60}\n")
+
+            try:
+                result = asyncio.run(create_account(
+                    referral_code=referral,
+                    fast=fast,
+                    account_num=account_num,
+                ))
+            except Exception as e:
+                print(f"  [!] Error on account {account_num}: {e}")
+                failures += 1
+                continue
+
+            # Risk control → STOP
+            if result and result.get('risk_control'):
+                print(f"\n  [!] RISK CONTROL detected on account #{account_num}!")
+                print(f"  [!] Referral code '{referral}' is blocked or IP is flagged.")
+                print(f"  [!] Stopping continuous mode.")
+                failures += 1
+                break
+
+            # Account creation failed (not risk control)
+            if result is None:
+                failures += 1
+                print(f"\n  [!] Account #{account_num} failed — skipping.")
+                continue
+
+            # Success
+            results.append(result)
+            last_success = result
+            balance = result.get('balance', 'N/A')
+            email = result.get('email', 'N/A')
+            success_count = len(results)
+            print(f"\n  ✓ Account #{account_num} created (balance: {balance})")
+            print(f"    Email: {email}")
+            print(f"    Running tally: {success_count} accounts created, {failures} failed")
+
+    except KeyboardInterrupt:
+        print(f"\n\n  [!] Interrupted by user (Ctrl+C)")
+
+    # Final summary
+    success_count = len(results)
+    print(f"\n{'=' * 60}")
+    print(f"  CONTINUOUS MODE — FINAL SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Total created:    {success_count}")
+    print(f"  Total failed:     {failures}")
+    print(f"  Total attempts:   {account_num}")
+    if last_success:
+        print(f"  Last success:     {last_success.get('email', 'N/A')} (balance: {last_success.get('balance', 'N/A')})")
+    print(f"{'=' * 60}")
+
+    if success_count > 0:
+        _save_combined(results, referral)
+        return 0
+    return 1
 
 
 def _run_parallel(count: int, referral: str, fast: bool, parallel: int) -> int:
