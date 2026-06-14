@@ -186,25 +186,37 @@ async def handle_terms_dialog(page, fast: bool = False):
     return False
 
 
-async def enter_referral(page, referral_code: str, fast: bool = False):
-    """Enter referral code using 6-char OTP input fields.
+async def enter_referral(page, referral_code: str, fast: bool = False) -> bool:
+    """Enter referral code. Returns True only if bind was attempted successfully.
 
-    CRITICAL: Uses page.get_by_role('textbox') for the 6 individual input fields.
+    Primary: UI flow. Fallback: authenticated API `/api/v1/invitation/bind`.
     """
     print(f"  Entering referral: {referral_code}")
+    referral_submitted = False
     try:
-        invite_btn = page.get_by_role(
-            'button', name=re.compile('invite|referral|Enter invite', re.I)
-        )
-        try:
-            count = await invite_btn.count()
-        except Exception:
-            count = 0
+        # Wait for SPA/sidebar to render
+        await asyncio.sleep(3)
 
-        if count > 0:
-            await invite_btn.first.click()
-            await asyncio.sleep(1.5)
+        # Primary UI selectors: button OR text-containing clickable nodes
+        invite_candidates = [
+            page.get_by_role('button', name=re.compile('invite|referral|Enter invite', re.I)),
+            page.locator('text=/Enter invite code/i'),
+            page.locator('text=/invite code/i'),
+        ]
 
+        clicked = False
+        for candidate in invite_candidates:
+            try:
+                count = await candidate.count()
+                if count > 0:
+                    await candidate.first.click(force=True, timeout=5000)
+                    await asyncio.sleep(1.5)
+                    clicked = True
+                    break
+            except Exception:
+                continue
+
+        if clicked:
             otp_fields = page.get_by_role(
                 'textbox', name=re.compile('OTP Input|Input', re.I)
             )
@@ -220,13 +232,55 @@ async def enter_referral(page, referral_code: str, fast: bool = False):
                     'button', name=re.compile('Redeem|Submit|Bind', re.I)
                 ).click()
                 await asyncio.sleep(2)
-                print("  Referral submitted!")
+                print("  Referral submitted via UI!")
+                referral_submitted = True
             else:
                 print(f"  [!] Expected 6 OTP fields, found {count}")
         else:
-            print("  [!] Invite button not found")
+            print("  [!] Invite UI not found, trying API fallback...")
+
+        # Fallback API bind if UI failed
+        if not referral_submitted:
+            api_result = await page.evaluate(
+                """
+                async (code) => {
+                    try {
+                        const resp = await fetch('/api/v1/invitation/bind', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            credentials: 'include',
+                            body: JSON.stringify({inviteCode: code})
+                        });
+                        const text = await resp.text();
+                        return {ok: resp.ok, status: resp.status, text};
+                    } catch (e) {
+                        return {ok: false, status: 0, text: e.message};
+                    }
+                }
+                """,
+                referral_code,
+            )
+            print(f"  API bind result: {api_result}")
+            referral_submitted = bool(api_result and api_result.get('ok'))
+
+        return referral_submitted
     except Exception as e:
         print(f"  [!] Referral error: {e}")
+        return False
+
+
+async def wait_for_balance_272(page, timeout: int = 60) -> str:
+    """Wait until balance is $2.72. Never proceed on $0.72."""
+    start = time.time()
+    last_balance = "$0.00"
+    while time.time() - start < timeout:
+        balance = await extract_balance(page)
+        last_balance = balance
+        if balance == "$2.72":
+            return balance
+        print(f"  Balance still {balance}, waiting...")
+        await asyncio.sleep(5)
+    return last_balance
 
 
 async def extract_balance(page) -> str:
@@ -530,23 +584,34 @@ async def create_account(
         # Phase 7: Balance + referral
         print("[8] Navigating to balance...")
         await page.goto(BALANCE_URL, wait_until='domcontentloaded')
+        await asyncio.sleep(3)  # wait for sidebar / invite button SPA render
         await handle_dialogs(page, fast)
 
-        # Enter referral
-        await enter_referral(page, referral_code, fast)
+        # Enter referral — MUST succeed before API key
+        referral_ok = await enter_referral(page, referral_code, fast)
         await handle_dialogs(page, fast)
         timer.phase("Referral entry")
 
-        # Phase 8: Verify balance
+        # Phase 8: Verify balance — MUST be $2.72 before continuing
         print("[10] Verifying balance...")
-        balance = await extract_balance(page)
+        balance = await wait_for_balance_272(page, timeout=60)
         print(f"  Balance: {balance}")
         timer.phase("Balance verify")
+
+        if balance != "$2.72":
+            print("[X] Referral/balance failed — stopping before API key. Not a success.")
+            await browser.close()
+            return None
 
         # Phase 9: API key
         print("[11] Creating API key...")
         api_key = await create_api_key(page, f"auto_{account_num}", fast)
         timer.phase("API key creation")
+
+        if not api_key:
+            print("[X] API key missing — stopping. Not a success.")
+            await browser.close()
+            return None
 
         # Phase 10: Save credentials
         print("[12] Saving credentials...")
