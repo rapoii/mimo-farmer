@@ -165,9 +165,13 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
                 account_num=i + 1,
             ))
             results.append(result)
+            if result is None:
+                print(f"\n  [!] Account {i + 1} failed — stopping batch.")
+                break
         except Exception as e:
             print(f"  [!] Error: {e}")
             results.append(None)
+            break
 
     success = sum(1 for r in results if r is not None)
     _save_combined(results, referral)
@@ -237,7 +241,7 @@ def _save_combined(results: list, referral: str) -> None:
     """
     from mimo_farmer.config import ACCOUNTS_DIR
 
-    valid = [r for r in results if r is not None]
+    valid = [r for r in results if r is not None and r.get('balance') == '$2.72']
     if not valid:
         return
 

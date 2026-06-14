@@ -21,6 +21,8 @@ import asyncio
 import json
 import os
 import re
+import secrets
+import string
 import time
 
 from patchright.async_api import async_playwright
@@ -152,7 +154,7 @@ async def handle_terms_dialog(page, fast: bool = False):
         try:
             await page.wait_for_selector(
                 'input[type="checkbox"]:visible, [role="checkbox"]:visible',
-                timeout=4000,
+                timeout=3000,
                 state='visible'
             )
             body = await page.evaluate("document.body?.innerText || ''")
@@ -161,7 +163,7 @@ async def handle_terms_dialog(page, fast: bool = False):
                 print(f"  Terms popup detected (attempt {wait_attempt + 1})")
                 break
         except Exception:
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     if not terms_appeared:
         print("  No terms popup found after waiting")
@@ -174,7 +176,7 @@ async def handle_terms_dialog(page, fast: bool = False):
     # Primary: click the actual checkbox input element
     try:
         await page.locator('input[type="checkbox"]').click()
-        await asyncio.sleep(2)  # Wait for React state update
+        await asyncio.sleep(1)  # Wait for React state update
 
         is_checked = await page.evaluate(
             "document.querySelector('.ant-checkbox-input')?.checked || false"
@@ -194,7 +196,7 @@ async def handle_terms_dialog(page, fast: bool = False):
     if not checkbox_checked:
         try:
             await page.locator('.ant-checkbox-input').click()
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
             is_checked = await page.evaluate(
                 "document.querySelector('.ant-checkbox-input')?.checked || false"
@@ -217,7 +219,7 @@ async def handle_terms_dialog(page, fast: bool = False):
         )
         if is_checked:
             # Extra wait — Confirm may enable after another render cycle
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             is_disabled = await page.evaluate(
                 "document.querySelector('.ant-modal-footer button:last-child')?.disabled ?? true"
             )
@@ -238,7 +240,7 @@ async def handle_terms_dialog(page, fast: bool = False):
     try:
         confirm_btn = page.locator('.ant-modal-footer button:last-child')
         await confirm_btn.click(timeout=5000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         modal_visible = await page.locator('.ant-modal-wrap:visible').count()
         if modal_visible == 0:
@@ -761,6 +763,9 @@ async def create_account(
     email, user, domain = random_email()
     if not account_num:
         account_num = int(time.time()) % 1000
+    # Generate random password per account (avoid bot detection)
+    if password == DEFAULT_PASSWORD:
+        password = 'Mm' + secrets.token_urlsafe(10) + '!9'
     timer = Timer()
     risk_control = False
 
@@ -916,7 +921,7 @@ async def create_account(
             # After verification, navigate to MiMo platform to establish session
             print("  Establishing MiMo platform session...")
             await page.goto("https://platform.xiaomimimo.com/", wait_until='domcontentloaded')
-            await asyncio.sleep(5)
+            await asyncio.sleep(2)
             await handle_dialogs(page, fast)
             timer.phase("Identity verification")
         else:
@@ -925,13 +930,13 @@ async def create_account(
         # Phase 6: Terms popup — CRITICAL
         # Wait for page to fully load before checking for terms
         print("[7] Handling terms popup...")
-        await asyncio.sleep(5)  # Wait for modal to fully render
+        await asyncio.sleep(2)  # Wait for modal to fully render
         terms_ok = False
         for _terms_attempt in range(3):
             terms_ok = await handle_terms_dialog(page, fast)
             if terms_ok:
                 break
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
         if terms_ok:
             print("  Terms dialog handled!")
         else:
@@ -969,7 +974,9 @@ async def create_account(
         print("[10] Checking for risk control...")
         risk_control = await detect_risk_control(page)
         if risk_control:
-            print("  [!] Risk control detected — continuing with limited account")
+            print("  [!] Risk control detected — STOPPING. Create new referral code.")
+            await browser.close()
+            return None
         timer.phase("Risk control check")
 
         # Phase 10: Verify balance — MUST be $2.72 before continuing
