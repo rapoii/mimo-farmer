@@ -791,8 +791,9 @@ async def create_account(
     if not account_num:
         account_num = int(time.time()) % 1000
     # Generate random password per account (avoid bot detection)
+    # Xiaomi: 8-16 chars, at least 2 of (digits, letters, special symbols)
     if password == DEFAULT_PASSWORD:
-        password = 'Mm' + secrets.token_urlsafe(10) + '!9'
+        password = 'Mm' + secrets.token_urlsafe(6) + '!9'
     timer = Timer()
     risk_control = False
 
