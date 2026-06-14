@@ -880,6 +880,9 @@ async def create_account(
             except Exception:
                 pass
 
+        # Wait for page transition after Next click
+        await asyncio.sleep(3)
+
         captcha_ok = await solve_recaptcha(page)
         if not captcha_ok:
             print("[X] reCAPTCHA failed!")

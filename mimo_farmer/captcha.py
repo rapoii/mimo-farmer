@@ -104,9 +104,9 @@ async def solve_recaptcha(page, max_retries: int = CAPTCHA_MAX_RETRIES) -> bool:
 
     print("  [captcha] Waiting for reCAPTCHA to load...")
 
-    # Find anchor frame with retry
+    # Find anchor frame with retry (up to 15s)
     anchor = None
-    for _ in range(10):
+    for _ in range(15):
         for frame in page.frames:
             if 'anchor' in frame.url and 'recaptcha' in frame.url:
                 anchor = frame
@@ -116,7 +116,11 @@ async def solve_recaptcha(page, max_retries: int = CAPTCHA_MAX_RETRIES) -> bool:
         await asyncio.sleep(1)
 
     if not anchor:
-        print("  [!] No reCAPTCHA found")
+        print("  [!] No reCAPTCHA anchor frame found after 15s")
+        # Debug: show all frame URLs
+        for i, frame in enumerate(page.frames):
+            url_short = frame.url[:100] if frame.url else "(empty)"
+            print(f"    frame[{i}]: {url_short}")
         return False
 
     # Click checkbox
