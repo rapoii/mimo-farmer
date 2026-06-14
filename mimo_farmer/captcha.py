@@ -286,7 +286,13 @@ async def solve_recaptcha(page, max_retries: int = CAPTCHA_MAX_RETRIES) -> bool:
             await asyncio.sleep(random.uniform(0.02, 0.08))
 
         await asyncio.sleep(random.uniform(0.3, 0.6))
-        await bframe.locator('#recaptcha-verify-button').click()
+        verify_btn = bframe.locator('#recaptcha-verify-button')
+        try:
+            await verify_btn.scroll_into_view_if_needed(timeout=3000)
+            await verify_btn.click(force=True, timeout=5000)
+        except Exception:
+            # Fallback: JS click
+            await bframe.evaluate('document.getElementById("recaptcha-verify-button")?.click()')
         await asyncio.sleep(2)
 
     print(f"  [!] Failed after {max_retries} attempts")
