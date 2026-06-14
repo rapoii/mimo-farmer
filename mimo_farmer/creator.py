@@ -169,28 +169,76 @@ async def handle_terms_dialog(page, fast: bool = False):
         print("  No terms popup found after waiting")
         return False
 
-    # Step 2: Click checkbox
-    await asyncio.sleep(0.5)  # Small settle time
-    checkbox_clicked = False
-    for cb_sel in [
-        '.ant-modal input[type="checkbox"]',
-        '[role="dialog"] input[type="checkbox"]',
-        'input[type="checkbox"]:visible',
-        '[role="checkbox"]:visible',
-    ]:
-        try:
-            cb = page.locator(cb_sel)
-            if await cb.count() > 0:
-                await cb.first.click(force=True)
-                await asyncio.sleep(0.8)
-                checkbox_clicked = True
-                print("  Checkbox clicked!")
-                break
-        except Exception:
-            continue
+    # Step 2: Click checkbox — use JS for reliability
+    await asyncio.sleep(1)  # Settle time after detection
+    checkbox_checked = False
 
-    if not checkbox_clicked:
-        print("  [!] Could not click checkbox")
+    # Strategy A: JS click checkbox and verify it's checked
+    try:
+        js_result = await page.evaluate('''() => {
+            // Find checkbox inputs
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            for (const cb of checkboxes) {
+                if (cb.offsetParent !== null) {  // visible
+                    cb.checked = true;
+                    cb.dispatchEvent(new Event('change', {bubbles: true}));
+                    cb.dispatchEvent(new Event('input', {bubbles: true}));
+                    return {checked: cb.checked, tag: cb.tagName, id: cb.id};
+                }
+            }
+            // Try role=checkbox
+            const roleCbs = document.querySelectorAll('[role="checkbox"]');
+            for (const cb of roleCbs) {
+                if (cb.offsetParent !== null) {
+                    cb.click();
+                    return {checked: true, tag: cb.tagName, cls: cb.className?.substring(0, 30)};
+                }
+            }
+            // Try label click (some UIs toggle via label)
+            const labels = document.querySelectorAll('label');
+            for (const lb of labels) {
+                if (lb.innerText.includes('agree') && lb.offsetParent !== null) {
+                    lb.click();
+                    return {checked: true, tag: 'LABEL', text: lb.innerText.substring(0, 40)};
+                }
+            }
+            return {checked: false};
+        }''')
+        if js_result and js_result.get('checked'):
+            checkbox_checked = True
+            print(f"  Checkbox checked via JS! ({js_result})")
+            await asyncio.sleep(1)
+    except Exception as e:
+        print(f"  JS checkbox error: {e}")
+
+    # Strategy B: Playwright click (fallback)
+    if not checkbox_checked:
+        for cb_sel in [
+            'input[type="checkbox"]:visible',
+            '[role="checkbox"]:visible',
+            '.ant-checkbox-input',
+        ]:
+            try:
+                cb = page.locator(cb_sel)
+                if await cb.count() > 0:
+                    await cb.first.check(force=True)
+                    await asyncio.sleep(1)
+                    is_checked = await cb.first.is_checked()
+                    print(f"  Checkbox clicked via Playwright, checked={is_checked}")
+                    checkbox_checked = True
+                    break
+            except Exception:
+                try:
+                    await cb.first.click(force=True)
+                    await asyncio.sleep(1)
+                    checkbox_checked = True
+                    print(f"  Checkbox clicked via Playwright (fallback click)")
+                    break
+                except Exception:
+                    continue
+
+    if not checkbox_checked:
+        print("  [!] Could not check checkbox")
         return False
 
     # Step 3: Click Confirm button — wait for it to appear after checkbox
