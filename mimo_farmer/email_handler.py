@@ -31,79 +31,68 @@ async def _extract_codes_from_page(email_page) -> list[str]:
 async def _click_email_and_get_code(email_page, skip_codes: set, inbox_url: str) -> str | None:
     """Click on Xiaomi email rows to read body, return new code if found.
 
-    generator.email shows email body INLINE when row is clicked (not navigation).
-    Uses JavaScript to click each row and extract codes from expanded body.
+    generator.email uses DIV-based layout (NOT <table>):
+    - Container: div#email-table
+    - Each email: a.list-group-item (clickable link)
+    - Clicking loads email body inline (URL stays on inbox page)
     """
     try:
-        rows = email_page.locator('table tr')
-        count = await rows.count()
-        print(f"  [otp] Found {count} table rows in inbox")
+        # CORRECT selector: a.list-group-item (NOT table tr!)
+        items = email_page.locator('#email-table a.list-group-item')
+        count = await items.count()
+
+        if count == 0:
+            # Fallback: try broader selector
+            items = email_page.locator('a.list-group-item')
+            count = await items.count()
+
+        print(f"  [otp] Found {count} email items in inbox")
 
         for i in range(count):
-            row = rows.nth(i)
+            item = items.nth(i)
             try:
-                row_text = await row.inner_text()
+                item_text = await item.inner_text()
             except Exception:
                 continue
 
-            # Skip header row
-            if 'From' in row_text and 'Subject' in row_text:
+            # Only process Xiaomi emails
+            if 'xiaomi' not in item_text.lower():
                 continue
 
-            # Only process rows from Xiaomi
-            if 'xiaomi' not in row_text.lower():
-                continue
+            subject = item_text.strip()[:80]
+            print(f"  [otp] Clicking email {i}: {subject}")
 
-            subject = row_text.strip()[:80]
-            print(f"  [otp] Clicking row {i}: {subject}")
-
-            # Try clicking the row via multiple methods
-            clicked = False
-            for method_name, method_fn in [
-                ("row.click", lambda r=row: r.click(timeout=3000)),
-                ("td click", lambda r=row: r.locator('td').nth(1).click(timeout=3000)),
-                ("JS click", lambda idx=i: email_page.evaluate(f"document.querySelectorAll('table tr')[{idx}]?.click()")),
-            ]:
-                try:
-                    await method_fn()
-                    clicked = True
-                    print(f"  [otp] Clicked via {method_name}")
-                    break
-                except Exception as e:
-                    print(f"  [otp] {method_name} failed: {str(e)[:50]}")
-                    continue
-
-            if not clicked:
-                print(f"  [otp] All click methods failed for row {i}")
-                continue
-
-            # Wait for email body to expand/load
-            await asyncio.sleep(3)
-
-            # Extract codes from current page (body should now be visible)
-            body_text = await email_page.evaluate("document.body?.innerText || ''")
-            all_codes = re.findall(r'\b(\d{6})\b', body_text)
-            print(f"  [otp] Codes found on page: {all_codes}")
-
-            # Filter: not year prefix, not in skip list
-            new_codes = [c for c in all_codes if not c.startswith('20') and c not in skip_codes]
-            if new_codes:
-                print(f"  [otp] New code found: {new_codes[0]}")
-                return new_codes[0]
-
-            print(f"  [otp] No new codes in this email (all in skip or none found)")
-
-            # Reload inbox for next iteration
             try:
-                await email_page.reload(wait_until='domcontentloaded')
-                await asyncio.sleep(2)
-            except Exception:
+                await item.click(timeout=3000)
+                await asyncio.sleep(3)
+
+                # Extract codes from current page (body now shows email content)
+                body_text = await email_page.evaluate("document.body?.innerText || ''")
+                all_codes = re.findall(r'\b(\d{6})\b', body_text)
+                print(f"  [otp] Codes found on page: {all_codes}")
+
+                # Filter: not year prefix, not in skip list
+                new_codes = [c for c in all_codes if not c.startswith('20') and c not in skip_codes]
+                if new_codes:
+                    print(f"  [otp] New code found: {new_codes[0]}")
+                    return new_codes[0]
+
+                print(f"  [otp] No new codes in this email")
+
+                # Go back to inbox
                 await email_page.goto(inbox_url, wait_until='domcontentloaded')
                 await asyncio.sleep(2)
 
-            # Re-get rows after reload (DOM may have changed)
-            rows = email_page.locator('table tr')
-            count = await rows.count()
+                # Re-get items after navigation
+                items = email_page.locator('#email-table a.list-group-item')
+                count = await items.count()
+            except Exception as e:
+                print(f"  [otp] Click error: {str(e)[:60]}")
+                try:
+                    await email_page.goto(inbox_url, wait_until='domcontentloaded')
+                    await asyncio.sleep(2)
+                except Exception:
+                    pass
 
     except Exception as e:
         print(f"  [otp] Email click scan error: {e}")
