@@ -729,6 +729,7 @@ async def create_account(
     referral_code: str = DEFAULT_REFERRAL_CODE,
     password: str = DEFAULT_PASSWORD,
     fast: bool = False,
+    account_num: int = 0,
 ) -> dict | None:
     """Full MiMo account creation pipeline.
 
@@ -758,7 +759,8 @@ async def create_account(
         Dict with credentials or None on failure
     """
     email, user, domain = random_email()
-    account_num = int(time.time()) % 1000
+    if not account_num:
+        account_num = int(time.time()) % 1000
     timer = Timer()
     risk_control = False
 

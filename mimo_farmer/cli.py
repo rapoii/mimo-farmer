@@ -161,6 +161,7 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
             result = asyncio.run(create_account(
                 referral_code=referral,
                 fast=fast,
+                account_num=i + 1,
             ))
             results.append(result)
         except Exception as e:
@@ -168,6 +169,7 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
             results.append(None)
 
     success = sum(1 for r in results if r is not None)
+    _save_combined(results, referral)
     print(f"\n{'=' * 60}")
     print(f"  Summary: {success}/{count} accounts created")
     print(f"{'=' * 60}")
@@ -178,26 +180,28 @@ def _run_parallel(count: int, referral: str, fast: bool, parallel: int) -> int:
     """Create accounts in parallel batches."""
     from mimo_farmer.creator import create_account
 
-    async def run_batch(batch_size: int):
+    async def run_batch(batch_size: int, start_num: int):
         tasks = [
-            create_account(referral_code=referral, fast=fast)
-            for _ in range(batch_size)
+            create_account(referral_code=referral, fast=fast, account_num=start_num + i)
+            for i in range(batch_size)
         ]
         return await asyncio.gather(*tasks, return_exceptions=True)
 
     results = []
     remaining = count
     batch_num = 0
+    account_counter = 0
 
     while remaining > 0:
         batch_size = min(parallel, remaining)
         batch_num += 1
+        account_counter += batch_size
         print(f"\n{'#' * 60}")
         print(f"  Batch {batch_num}: {batch_size} parallel account(s)")
         print(f"{'#' * 60}\n")
 
         try:
-            batch_results = asyncio.run(run_batch(batch_size))
+            batch_results = asyncio.run(run_batch(batch_size, account_counter - batch_size + 1))
             for r in batch_results:
                 if isinstance(r, Exception):
                     print(f"  [!] Error: {r}")
@@ -211,10 +215,47 @@ def _run_parallel(count: int, referral: str, fast: bool, parallel: int) -> int:
         remaining -= batch_size
 
     success = sum(1 for r in results if r is not None)
+    _save_combined(results, referral)
     print(f"\n{'=' * 60}")
     print(f"  Summary: {success}/{count} accounts created")
     print(f"{'=' * 60}")
     return 0 if success > 0 else 1
+
+
+def _save_combined(results: list, referral: str) -> None:
+    """Save all credentials in combined format.
+
+    Format:
+    [1]
+    Mail: email@banri.xyz
+    Pw: papoi123
+    Api-Key: sk-xxxxxxxxxx
+
+    [2]
+    ...
+    """
+    from mimo_farmer.config import ACCOUNTS_DIR
+
+    valid = [r for r in results if r is not None]
+    if not valid:
+        return
+
+    os.makedirs(ACCOUNTS_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    combined_path = os.path.join(ACCOUNTS_DIR, f"batch_{ts}.txt")
+
+    lines = []
+    for i, creds in enumerate(valid, 1):
+        lines.append(f"[{i}]")
+        lines.append(f"Mail: {creds['email']}")
+        lines.append(f"Pw: {creds['password']}")
+        lines.append(f"Api-Key: {creds.get('api_key', 'N/A')}")
+        lines.append("")
+
+    with open(combined_path, "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"\n  Combined credentials saved: {combined_path}")
 
 
 def cmd_accounts(args) -> int:
