@@ -1007,7 +1007,16 @@ async def create_account(
         if risk_control:
             print("  [!] Risk control detected — STOPPING. Create new referral code.")
             await browser.close()
-            return None
+            return {
+                "email": email,
+                "password": password,
+                "balance": "$0.72",
+                "referral": referral_code,
+                "api_key": None,
+                "risk_control": True,
+                "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "method": "cli_auto",
+            }
         timer.phase("Risk control check")
 
         # Phase 10: Verify balance — MUST be $2.72 before continuing

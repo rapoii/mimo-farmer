@@ -292,7 +292,8 @@ def cmd_accounts(args) -> int:
         return 1
 
     json_files = sorted([
-        f for f in os.listdir(ACCOUNTS_DIR) if f.endswith('.json')
+        f for f in os.listdir(ACCOUNTS_DIR)
+        if f.endswith('.json') and not f.startswith('export_')
     ])
 
     if not json_files:
@@ -327,7 +328,8 @@ def cmd_export(args) -> int:
         return 1
 
     json_files = sorted([
-        f for f in os.listdir(ACCOUNTS_DIR) if f.endswith('.json')
+        f for f in os.listdir(ACCOUNTS_DIR)
+        if f.endswith('.json') and not f.startswith('export_')
     ])
 
     if not json_files:
