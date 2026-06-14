@@ -57,16 +57,16 @@ examples:
     p_create.add_argument(
         "--count", "-n",
         type=int,
-        default=1,
+        default=None,
         metavar="N",
-        help="Number of accounts to create (default: 1)",
+        help="Number of accounts to create (prompted if not provided)",
     )
     p_create.add_argument(
         "--referral", "-r",
         type=str,
-        default=DEFAULT_REFERRAL_CODE,
+        default=None,
         metavar="CODE",
-        help=f"Referral code to use (default: {DEFAULT_REFERRAL_CODE})",
+        help="Referral code to use (prompted if not provided)",
     )
     p_create.add_argument(
         "--fast", "-f",
@@ -120,22 +120,24 @@ def cmd_create(args) -> int:
     fast = args.fast
     parallel = args.parallel
 
-    # Interactive prompts — WAJIB diisi
-    while True:
-        referral = input("Kode referral: ").strip().upper()
-        if referral:
-            break
-        print("  [!] Kode referral wajib diisi!")
-
-    while True:
-        user_input = input("Mau bikin berapa akun? ").strip()
-        try:
-            count = int(user_input)
-            if count > 0:
+    # Interactive prompts — only if args not provided via CLI
+    if not referral:
+        while True:
+            referral = input("Kode referral: ").strip().upper()
+            if referral:
                 break
-            print("  [!] Minimal 1 akun!")
-        except ValueError:
-            print("  [!] Masukkan angka yang valid!")
+            print("  [!] Kode referral wajib diisi!")
+
+    if not count or count < 1:
+        while True:
+            user_input = input("Mau bikin berapa akun? ").strip()
+            try:
+                count = int(user_input)
+                if count > 0:
+                    break
+                print("  [!] Minimal 1 akun!")
+            except ValueError:
+                print("  [!] Masukkan angka yang valid!")
 
     print(f"\nMiMo CLI v{__version__}")
     print(f"Creating {count} account(s) | Referral: {referral} | Fast: {fast} | Parallel: {parallel}")
