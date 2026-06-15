@@ -268,6 +268,28 @@ def _run_continuous(referral: str, fast: bool) -> int:
             print(f"    Email: {email}")
             print(f"    Running tally: {success_count} accounts created, {failures} failed")
 
+            # IP cooldown alert — every 4 successful accounts
+            if success_count % 4 == 0:
+                print(f"\n{'!' * 60}")
+                print(f"  ⚠️  IP COOLDOWN ALERT")
+                print(f"  Kamu udah bikin {success_count} akun berturut-turut.")
+                print(f"  Risk control makin tinggi tiap 4 akun.")
+                print(f"{'!' * 60}")
+                try:
+                    choice = input("\n  Ganti IP dulu? [y/N]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    choice = 'n'
+
+                if choice == 'y':
+                    print("\n  ⏳ Ganti IP kamu sekarang (VPN/mobile hotspot).")
+                    try:
+                        input("  Tekan ENTER kalau udah ganti IP...")
+                    except (EOFError, KeyboardInterrupt):
+                        pass
+                    print("  ✅ IP changed! Lanjut nuyul...\n")
+                else:
+                    print("  ⏭️  Lanjut tanpa ganti IP (risk control makin tinggi)\n")
+
     except KeyboardInterrupt:
         print(f"\n\n  [!] Interrupted by user (Ctrl+C)")
 
