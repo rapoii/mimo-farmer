@@ -9,10 +9,43 @@ import time
 from mimo_farmer.config import EMAIL_DOMAINS, OTP_TIMEOUT_SECONDS, OTP_POLL_INTERVAL_SECONDS
 
 
-def random_email() -> tuple[str, str, str]:
-    """Generate random email address for generator.email."""
+def get_available_domains() -> list[str]:
+    """Scrape available email domains from generator.email.
+
+    Falls back to EMAIL_DOMAINS config if scraping fails.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['curl', '-s', 'https://generator.email', '--max-time', '15'],
+            capture_output=True, text=True, timeout=20
+        )
+        html = result.stdout
+        # Extract domains from quoted strings in the page
+        domains = re.findall(r'"([a-z0-9.-]+\.[a-z]{2,})"', html)
+        # Filter: only real email domains (skip CDN/analytics/w3c)
+        skip = {'google-analytics.com', 'googlesyndication.com', 'googletagmanager.com',
+                'jsdelivr.net', 'w3.org', 'googleapis.com', 'gstatic.com'}
+        domains = sorted(set(d for d in domains if d not in skip and '.' in d))
+        if domains:
+            print(f"  [email] Found {len(domains)} domains from generator.email")
+            return domains
+    except Exception as e:
+        print(f"  [email] Domain fetch failed: {e}")
+    return EMAIL_DOMAINS
+
+
+def random_email(domains: list[str] = None) -> tuple[str, str, str]:
+    """Generate random email address for generator.email.
+
+    Args:
+        domains: Optional list of domains to pick from.
+                 If None, uses EMAIL_DOMAINS config.
+    """
+    if domains is None:
+        domains = EMAIL_DOMAINS
     user = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-    domain = random.choice(EMAIL_DOMAINS)
+    domain = random.choice(domains)
     return f"{user}@{domain}", user, domain
 
 

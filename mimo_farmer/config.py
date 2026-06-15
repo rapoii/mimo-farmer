@@ -32,5 +32,5 @@ OTP_POLL_INTERVAL_SECONDS = 1.5
 CAPTCHA_MAX_RETRIES = 5
 
 # Email domains for generator.email
-# NOTE: banri.xyz is the only working domain — all other domains are blocked by Xiaomi
+# Fallback if dynamic scraping fails
 EMAIL_DOMAINS = ["banri.xyz"]

@@ -34,7 +34,7 @@ from mimo_farmer.config import (
     FAST_DELAY_MIN_MS, FAST_DELAY_MAX_MS, FAST_MODE_MULTIPLIER,
 )
 from mimo_farmer.captcha import solve_recaptcha, solve_text_captcha, detect_xiaomi_captcha
-from mimo_farmer.email_handler import random_email, wait_for_otp
+from mimo_farmer.email_handler import random_email, wait_for_otp, get_available_domains
 
 
 class Timer:
@@ -797,6 +797,11 @@ async def create_account(
     timer = Timer()
     risk_control = False
 
+    # Fetch available domains from generator.email (once per session)
+    available_domains = get_available_domains()
+    email_retries = 0
+    MAX_EMAIL_RETRIES = 5
+
     mode_label = "FAST" if fast else "NORMAL"
     print("=" * 60)
     print(f"  MiMo Account Creator — Mode: {mode_label}")
@@ -872,17 +877,67 @@ async def create_account(
         timer.phase("Fill form")
 
         # Phase 3: Submit + CAPTCHA (dual detection: reCAPTCHA OR Xiaomi text)
-        print("[3] Clicking Next + solving CAPTCHA...")
-        try:
-            await page.get_by_role('button', name='Next').click(timeout=5000)
-        except Exception:
+        # Include email retry logic — if email is rejected, generate new one
+        while True:
+            print("[3] Clicking Next + solving CAPTCHA...")
             try:
-                await page.locator('button[type="submit"]').click(timeout=3000)
+                await page.get_by_role('button', name='Next').click(timeout=5000)
             except Exception:
-                pass
+                try:
+                    await page.locator('button[type="submit"]').click(timeout=3000)
+                except Exception:
+                    pass
 
-        # Wait for page transition after Next click
-        await asyncio.sleep(3)
+            # Wait for page transition after Next click
+            await asyncio.sleep(3)
+
+            # Check for email validation error (email domain rejected by Xiaomi)
+            email_rejected = await page.evaluate("""
+                (() => {
+                    const body = document.body?.innerText || '';
+                    const lower = body.toLowerCase();
+                    // Common error messages when email is not accepted
+                    if (lower.includes('not supported') && lower.includes('email')) return 'not_supported';
+                    if (lower.includes('invalid email')) return 'invalid';
+                    if (lower.includes('email address is not valid')) return 'invalid';
+                    if (lower.includes('please enter a valid email')) return 'invalid';
+                    if (lower.includes('邮箱')) return 'email_error';
+                    // Check for inline error near email field
+                    const errors = document.querySelectorAll('.ant-form-item-explain-error, .error-message, [class*="error"]');
+                    for (const el of errors) {
+                        const t = (el.textContent || '').toLowerCase();
+                        if (t.includes('email') || t.includes('not supported') || t.includes('invalid')) {
+                            return 'inline_error';
+                        }
+                    }
+                    return '';
+                })()
+            """)
+
+            if email_rejected and email_retries < MAX_EMAIL_RETRIES:
+                email_retries += 1
+                print(f"  [!] Email rejected ({email_rejected}) — trying new domain (attempt {email_retries}/{MAX_EMAIL_RETRIES})")
+                email, user, domain = random_email(available_domains)
+                print(f"  [email] New email: {email}")
+
+                # Clear and refill email field
+                try:
+                    email_field = page.get_by_role('textbox', name='Email')
+                    await email_field.wait_for(state='visible', timeout=5000)
+                    await email_field.fill('')
+                    await asyncio.sleep(0.3)
+                    await email_field.fill(email)
+                    await human_delay(150, 350, fast)
+                except Exception:
+                    # Fallback selector
+                    try:
+                        await page.locator('input[type="email"]').fill(email)
+                    except Exception:
+                        print("  [!] Could not update email field")
+                        break
+                continue  # Click Next again with new email
+
+            break  # No email rejection or max retries reached — proceed
 
         # DETECT which type of CAPTCHA appeared
         captcha_ok = False
