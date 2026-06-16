@@ -1413,29 +1413,7 @@ async def create_account(
             "method": "mimo-farmer",
         }
 
-        os.makedirs(ACCOUNTS_DIR, exist_ok=True)
-        filename = f"auto_{account_num}_full.txt"
-        filepath = os.path.join(ACCOUNTS_DIR, filename)
-        with open(filepath, "w") as f:
-            f.write(f"=== MiMo Account {account_num} ===\n")
-            f.write(f"Email: {email}\n")
-            f.write(f"Email Link: https://generator.email/{email}\n")
-            f.write(f"Password: {password}\n")
-            f.write(f"Balance: {balance}\n")
-            f.write(f"Referral: {referral_code}\n")
-            if own_referral:
-                f.write(f"Own Referral Code: {own_referral}\n")
-            f.write(f"API Key: {api_key or 'N/A'}\n")
-            f.write(f"Risk Control: {risk_control}\n")
-            f.write(f"Created: {creds['created']}\n")
-            f.write(f"Method: mimo-farmer\n")
-
-        # Also save as JSON for easy parsing
-        json_path = os.path.join(ACCOUNTS_DIR, f"auto_{account_num}_full.json")
-        with open(json_path, "w") as f:
-            json.dump(creds, f, indent=2)
-
-        print(f"  Saved: {filepath}")
+        # Per-account files removed — only batch file saved at end of run
 
         # Phase 13: Logout + clear all traces (for next account in batch)
         print("[14] Logging out...")
