@@ -11,7 +11,6 @@ SIGNUP_URL = "https://global.account.xiaomi.com/fe/service/register?_locale=en&s
 BALANCE_URL = "https://platform.xiaomimimo.com/console/balance"
 API_KEYS_URL = "https://platform.xiaomimimo.com/console/api-keys"
 LOGOUT_URL = "https://account.xiaomi.com/pass/logout"
-INVITE_URL = "https://platform.xiaomimimo.com/console/invite"
 
 # Paths
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -29,7 +29,7 @@ from patchright.async_api import async_playwright
 
 from mimo_farmer.config import (
     DEFAULT_PASSWORD, DEFAULT_REFERRAL_CODE, SIGNUP_URL,
-    BALANCE_URL, API_KEYS_URL, LOGOUT_URL, INVITE_URL, ACCOUNTS_DIR,
+    BALANCE_URL, API_KEYS_URL, LOGOUT_URL, ACCOUNTS_DIR,
     HUMAN_DELAY_MIN_MS, HUMAN_DELAY_MAX_MS,
     FAST_DELAY_MIN_MS, FAST_DELAY_MAX_MS, FAST_MODE_MULTIPLIER,
 )
@@ -367,10 +367,13 @@ async def enter_referral(page, referral_code: str, fast: bool = False) -> bool:
 
 
 async def extract_own_referral_code(page) -> str | None:
-    """Extract this account's own referral code from the invite page.
+    """Extract this account's own referral code via "Refer & earn" dialog.
 
-    Navigates to INVITE_URL and scrapes the 6-char referral code.
-    Falls back to API endpoint if UI scraping fails.
+    Flow (VERIFIED via MCP Playwright 2026-06-16):
+    1. On balance page, click "Refer & earn" button in sidebar
+    2. Dialog appears with QR code + "Invite code: XXXXXX"
+    3. Extract 6-char code from dialog
+    4. Close dialog
 
     Returns 6-char referral code string or None.
     """
@@ -378,119 +381,110 @@ async def extract_own_referral_code(page) -> str | None:
     own_code = None
 
     try:
-        await page.goto(INVITE_URL, wait_until='domcontentloaded')
-        await asyncio.sleep(4)
-        await handle_dialogs(page)
-        await handle_terms_dialog(page)
+        # Step 1: Click "Refer & earn" button in sidebar
+        refer_btn = page.get_by_role('button', name=re.compile('Refer.*earn|Refer &', re.I))
+        if await refer_btn.count() > 0:
+            await refer_btn.first.click(timeout=5000)
+            print("  [invite] Clicked 'Refer & earn' button")
+            await asyncio.sleep(3)
+        else:
+            # Fallback: try text-based selector
+            refer_btn = page.locator('text=/Refer.*earn/i').first
+            if await refer_btn.count() > 0:
+                await refer_btn.click(timeout=5000)
+                print("  [invite] Clicked 'Refer & earn' (text fallback)")
+                await asyncio.sleep(3)
+            else:
+                print("  [!] 'Refer & earn' button not found")
+                return None
 
-        # Strategy 1: Look for a copyable code element (common patterns)
-        code_selectors = [
-            # Code in a prominent display element
-            '[class*="code"] [class*="value"]',
-            '[class*="invite-code"]',
-            '[class*="referral-code"]',
-            '[class*="invite"] code',
-            '[class*="invite"] pre',
-            # Clipboard-able text
-            '[data-clipboard-text]',
-            '[class*="copy"] [class*="text"]',
-        ]
-        for sel in code_selectors:
-            try:
-                el = page.locator(sel).first
-                if await el.count() > 0:
-                    text = (await el.text_content() or '').strip()
-                    # Validate: 6 alphanumeric chars
-                    if len(text) == 6 and text.isalnum():
-                        own_code = text.upper()
-                        print(f"  [invite] Found code via selector: {own_code}")
-                        break
-            except Exception:
-                continue
+        # Step 2: Wait for dialog to appear
+        dialog = page.locator('dialog, [role="dialog"], .ant-modal-wrap')
+        if await dialog.count() == 0:
+            # Wait a bit more
+            await asyncio.sleep(2)
+            dialog = page.locator('dialog, [role="dialog"], .ant-modal-wrap')
 
-        # Strategy 2: Scan all visible text for 6-char alphanumeric pattern
+        if await dialog.count() == 0:
+            print("  [!] No dialog appeared after clicking Refer & earn")
+            return None
+
+        # Strategy 1: Find "Invite code" label, get adjacent text (VERIFIED)
+        try:
+            invite_label = page.locator('text=/Invite code/i')
+            if await invite_label.count() > 0:
+                # The code is in the next sibling element
+                code_el = invite_label.locator('+ *')
+                if await code_el.count() > 0:
+                    text = (await code_el.first.text_content() or '').strip()
+                    if len(text) >= 6 and text.isalnum():
+                        own_code = text[:6].upper()
+                        print(f"  [invite] Found code via 'Invite code' label: {own_code}")
+        except Exception:
+            pass
+
+        # Strategy 2: Scan dialog text for 6-char alphanumeric pattern
         if not own_code:
             try:
-                body = await page.evaluate("document.body.innerText")
-                # Look for patterns like "Your code: ABC123" or "ABC123"
-                candidates = re.findall(r'\b([A-Z0-9]{6})\b', body.upper())
-                # Filter out common non-code strings
+                dialog_text = await dialog.first.evaluate("el => el.innerText")
+                candidates = re.findall(r'\b([A-Z0-9]{6})\b', dialog_text.upper())
                 blacklist = {
                     'INVITE', 'REFERR', 'XIAOMI', 'ACCEPT', 'CONFIRM', 'SUBMIT',
                     'CANCEL', 'CREATE', 'DELETE', 'SEARCH', 'FILTER', 'COOKIE',
                     'POLICY', 'LAYOUT', 'MODULE', 'RETURN', 'BEFORE', 'AFTER',
                     'FINISH', 'OPTION', 'NUMBER', 'DETAIL', 'RESULT', 'MI MORE',
                     'BUTTON', 'CLOSED', 'SAVED', 'STATUS', 'RETRY', 'LOGIN',
+                    'EARN', 'SHARE',
                 }
                 for c in candidates:
                     if c not in blacklist:
                         own_code = c
-                        print(f"  [invite] Found code via regex scan: {own_code}")
+                        print(f"  [invite] Found code via dialog regex scan: {own_code}")
                         break
             except Exception:
                 pass
 
-        # Strategy 3: Try API endpoint
+        # Strategy 3: Click Copy button in dialog and check clipboard
         if not own_code:
             try:
-                api_result = await page.evaluate("""
-                    async () => {
-                        try {
-                            const urls = [
-                                '/api/v1/invitation/code',
-                                '/api/v1/invite/code',
-                                '/api/v1/user/invite-code',
-                                '/api/v1/referral/code',
-                            ];
-                            for (const url of urls) {
-                                const resp = await fetch(url, {credentials: 'include'});
-                                if (resp.ok) {
-                                    const data = await resp.json();
-                                    const text = JSON.stringify(data);
-                                    const m = text.match(/"([A-Z0-9]{6})"/i);
-                                    if (m) return m[1].toUpperCase();
-                                }
-                            }
-                        } catch (e) {}
-                        return null;
-                    }
-                """)
-                if api_result and len(api_result) == 6:
-                    own_code = api_result.upper()
-                    print(f"  [invite] Found code via API: {own_code}")
-            except Exception:
-                pass
-
-        # Strategy 4: Check clipboard (some pages auto-copy)
-        if not own_code:
-            try:
-                copy_btn = page.locator(
-                    'button:has-text("Copy"), button[aria-label*="copy" i], '
-                    '[class*="copy-btn"], [class*="copy"] button'
-                ).first
+                copy_btn = dialog.locator('button:has-text("Copy")').first
                 if await copy_btn.count() > 0:
                     await copy_btn.click()
                     await asyncio.sleep(1)
                     clipboard = await page.evaluate("navigator.clipboard.readText()")
-                    if clipboard and len(clipboard.strip()) == 6 and clipboard.strip().isalnum():
-                        own_code = clipboard.strip().upper()
-                        print(f"  [invite] Found code via clipboard: {own_code}")
+                    if clipboard and len(clipboard.strip()) >= 6:
+                        code_match = re.search(r'([A-Z0-9]{6})', clipboard.upper())
+                        if code_match:
+                            own_code = code_match.group(1)
+                            print(f"  [invite] Found code via clipboard: {own_code}")
             except Exception:
                 pass
 
-    except Exception as e:
-        print(f"  [!] Invite page error: {e}")
+        # Close the dialog
+        try:
+            close_btn = page.locator(
+                'dialog button:has-text("close"), dialog button[aria-label="Close"], '
+                '.ant-modal-close, dialog button img[alt="close"]'
+            ).first
+            if await close_btn.count() > 0:
+                await close_btn.click(timeout=3000)
+                print("  [invite] Dialog closed")
+            else:
+                # Try pressing Escape
+                await page.keyboard.press('Escape')
+                print("  [invite] Dialog closed via Escape")
+        except Exception:
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+        await asyncio.sleep(1)
 
-    # CRITICAL: Navigate back to balance page so caller's risk control / balance checks
-    # read from the correct page (not the invite page).
-    try:
-        await page.goto(BALANCE_URL, wait_until='domcontentloaded')
-        await asyncio.sleep(2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [!] Referral extraction error: {e}")
 
     if not own_code:
-        print("  [!] Could not extract own referral code from any method")
+        print("  [!] Could not extract own referral code")
 
     return own_code
 
