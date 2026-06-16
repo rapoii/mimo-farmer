@@ -148,14 +148,48 @@ async def solve_text_captcha(page, max_retries: int = 3) -> bool:
                 print(f"  [captcha] Could not click Submit (attempt {attempt})")
                 continue
 
-            # Wait and check if solved
-            await asyncio.sleep(2)
-            if not await detect_xiaomi_captcha(page):
-                print(f"  [captcha] ✅ Auto-solved with ddddocr! ('{result}')")
+            # Wait for page to react
+            await asyncio.sleep(3)
+
+            # Check if CAPTCHA popup still showing → definitely wrong
+            if await detect_xiaomi_captcha(page):
+                print(f"  [captcha] Wrong answer — popup still showing (attempt {attempt})")
+                await asyncio.sleep(1)
+                continue
+
+            # Popup gone — but is it actually solved? Check if page progressed
+            progressed = await page.evaluate("""
+                (() => {
+                    const body = document.body?.innerText || '';
+                    const url = window.location.href;
+                    // OTP page indicators
+                    if (body.includes('Enter the verification code')) return 'otp';
+                    if (body.includes('OTP') && body.includes('input')) return 'otp';
+                    if (url.includes('verify') || url.includes('otp')) return 'otp_url';
+                    // Still on signup page?
+                    if (body.includes('Create an account') || body.includes('Sign up')) return 'still_signup';
+                    // Error message?
+                    if (body.includes('incorrect') || body.includes('error') || body.includes('invalid')) return 'error';
+                    // CAPTCHA error text?
+                    if (body.includes('verification code error') || body.includes('wrong code')) return 'wrong_code';
+                    return 'unknown';
+                })()
+            """)
+            print(f"  [captcha] Page state after submit: {progressed}")
+
+            if progressed in ('otp', 'otp_url'):
+                print(f"  [captcha] ✅ Auto-solved! Reached OTP page ('{result}')")
                 return True
 
-            print(f"  [captcha] Wrong answer — retrying...")
-            await asyncio.sleep(1)
+            if progressed in ('still_signup', 'error', 'wrong_code'):
+                print(f"  [captcha] Wrong answer ({progressed}) — retrying...")
+                # Try to get new captcha image for next attempt
+                await asyncio.sleep(1)
+                continue
+
+            # Unknown state — might be solved, proceed cautiously
+            print(f"  [captcha] Unknown state ({progressed}) — assuming solved")
+            return True
 
         print(f"  [captcha] ddddocr failed after {max_retries} attempts — falling back to manual")
 
