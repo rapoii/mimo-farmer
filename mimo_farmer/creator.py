@@ -1088,23 +1088,20 @@ async def create_account(
         # Keep solving until neither is detected
         captcha_rounds = 0
         MAX_CAPTCHA_ROUNDS = 5
+        recaptcha_solved = False  # Track if we already solved reCAPTCHA
 
         while captcha_rounds < MAX_CAPTCHA_ROUNDS:
             captcha_rounds += 1
-            captcha_solved_this_round = False
 
-            # If we already solved something in a previous round, check if page progressed
-            # (frame detach means signup submitted — page may have moved on)
+            # If we already solved something, check if page progressed past CAPTCHA
             if captcha_rounds > 1:
                 page_progressed = await page.evaluate("""
                     (() => {
                         const body = document.body?.innerText || '';
                         const url = window.location.href;
-                        // If we're past signup/CAPTTCHA, break the loop
                         if (body.includes('Enter the verification code')) return true;
                         if (body.includes('OTP') || body.includes('one-time')) return true;
                         if (url.includes('verify') || url.includes('otp')) return true;
-                        if (!body.includes('Sign up') && !body.includes('Create an account')) return true;
                         return false;
                     })()
                 """)
@@ -1112,7 +1109,7 @@ async def create_account(
                     print(f"  [captcha] Page progressed past CAPTCHA stage — done (round {captcha_rounds})")
                     break
 
-            # Check 1: Xiaomi text CAPTCHA popup (manual solve by user)
+            # Check 1: Xiaomi text CAPTCHA popup (auto ddddocr + manual fallback)
             is_xiaomi_captcha = await detect_xiaomi_captcha(page)
             if is_xiaomi_captcha:
                 print(f"  [!] Xiaomi text CAPTCHA detected (round {captcha_rounds})")
@@ -1121,56 +1118,53 @@ async def create_account(
                     print("[X] Xiaomi text CAPTCHA failed!")
                     await browser.close()
                     return None
-                captcha_solved_this_round = True
-                await asyncio.sleep(2)  # Wait for page to update after solve
-                continue  # Re-check for more CAPTCHAs
+                await asyncio.sleep(2)
+                continue
 
             # Check 2: reCAPTCHA anchor frame (automated audio solve)
+            # Skip if we already solved reCAPTCHA (page may show stale frame)
             has_recaptcha = False
-            recaptcha_already_solved = False
+            recaptcha_already_checked = False
             for frame in page.frames:
                 if 'anchor' in frame.url and 'recaptcha' in frame.url:
                     has_recaptcha = True
-                    # Check if already solved (aria-checked="true")
                     try:
                         checked = await frame.evaluate(
                             "document.getElementById('recaptcha-anchor')?.getAttribute('aria-checked') || 'false'"
                         )
                         if checked == 'true':
-                            recaptcha_already_solved = True
+                            recaptcha_already_checked = True
                     except Exception:
                         pass
                     break
 
-            if has_recaptcha and not recaptcha_already_solved:
+            if has_recaptcha and not recaptcha_already_checked and not recaptcha_solved:
                 print(f"  [!] reCAPTCHA detected (round {captcha_rounds})")
                 captcha_ok = await solve_recaptcha(page)
-                if not captcha_ok:
+                if captcha_ok:
+                    recaptcha_solved = True
+                else:
                     print("[X] reCAPTCHA failed!")
                     await browser.close()
                     return None
-                captcha_solved_this_round = True
-                await asyncio.sleep(2)  # Wait for page to update after solve
-                continue  # Re-check for more CAPTCHAs (Xiaomi may appear after reCAPTCHA)
-            elif has_recaptcha and recaptcha_already_solved:
-                print(f"  [✓] reCAPTCHA already solved (round {captcha_rounds}) — skipping")
-
-            # Neither detected this round
-            if captcha_solved_this_round:
-                # We solved something earlier — wait and check once more
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
                 continue
+            elif has_recaptcha and (recaptcha_already_checked or recaptcha_solved):
+                print(f"  [✓] reCAPTCHA already solved (round {captcha_rounds}) — skipping")
+                # Don't loop forever on stale frame
+                await asyncio.sleep(2)
+                # Check one more time if Xiaomi CAPTCHA appeared
+                if await detect_xiaomi_captcha(page):
+                    continue
+                break  # No new CAPTCHA — done
 
-            # First round with no CAPTCHA — wait a bit (might be loading slowly)
+            # Neither detected — wait and check once more
             if captcha_rounds <= 2:
                 await asyncio.sleep(3)
                 continue
 
-            # Multiple rounds with no CAPTCHA — we're done
+            # Multiple rounds with no CAPTCHA — done
             break
-
-        if captcha_rounds >= MAX_CAPTCHA_ROUNDS:
-            print(f"  [!] Max CAPTCHA rounds ({MAX_CAPTCHA_ROUNDS}) reached — proceeding anyway")
 
         print(f"  CAPTCHA handling done ({captcha_rounds} round(s))")
 
