@@ -148,28 +148,6 @@ async def wait_for_otp(page, user: str, domain: str, timeout: int = OTP_TIMEOUT_
     await email_page.goto(inbox_url, wait_until='domcontentloaded', timeout=60000)
     await asyncio.sleep(4)
 
-    # Check if generator.email says domain is "not supported" (bad domain)
-    try:
-        domain_status = await email_page.evaluate("""
-            (() => {
-                const el = document.getElementById('checkdomainset');
-                if (!el) return '';
-                const text = (el.textContent || '').toLowerCase();
-                const cls = el.className || '';
-                if (text.includes('not supported') || cls.includes('redclass')) return 'not_supported';
-                if (text.includes('approved')) return 'good';
-                return '';
-            })()
-        """)
-        if domain_status == 'not_supported':
-            print(f"  [otp] Domain {domain} is NOT SUPPORTED by generator.email — aborting")
-            await email_page.close()
-            return "__UNSAFE__"
-        elif domain_status == 'good':
-            print(f"  [otp] Domain {domain} approved")
-    except Exception:
-        pass
-
     start = time.time()
     code = None
     check_count = 0

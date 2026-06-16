@@ -659,9 +659,6 @@ async def handle_identity_verification(page, user: str, domain: str, fast: bool 
     skip = [first_otp] if first_otp else []
     code = await wait_for_otp(page, user, domain, timeout=180, skip_codes=skip)
 
-    if code == "__UNSAFE__":
-        print("  [!] Email domain not supported by generator.email!")
-        return False
     if not code:
         print("  [!] Verification code not received after 180s!")
         return True
@@ -1026,11 +1023,10 @@ async def create_account(
         # Phase 3: Submit + CAPTCHA + OTP (with email retry on "not safe")
         # Outer loop: retries with new email when Xiaomi says "not safe"
         email_signup_attempt = 0
-        MAX_EMAIL_SIGNUP_ATTEMPTS = 3
 
-        while email_signup_attempt <= MAX_EMAIL_SIGNUP_ATTEMPTS:
+        while True:
             if email_signup_attempt > 0:
-                print(f"\n  [retry] Email signup attempt {email_signup_attempt}/{MAX_EMAIL_SIGNUP_ATTEMPTS}")
+                print(f"\n  [retry] Email signup attempt {email_signup_attempt}")
 
             # Inner loop: Click Next + handle immediate email rejection
             while True:
@@ -1211,12 +1207,7 @@ async def create_account(
             # Handle "not safe" email — retry with new email
             if code == "__UNSAFE__":
                 email_signup_attempt += 1
-                if email_signup_attempt > MAX_EMAIL_SIGNUP_ATTEMPTS:
-                    print("[X] Max email signup attempts reached!")
-                    await browser.close()
-                    return None
-
-                print(f"  [!] Unsafe email — retrying signup with new email (attempt {email_signup_attempt}/{MAX_EMAIL_SIGNUP_ATTEMPTS})")
+                print(f"  [!] Unsafe email — retrying signup with new email (attempt {email_signup_attempt})")
                 email, user, domain = random_email(available_domains)
                 print(f"  [email] New email: {email}")
 

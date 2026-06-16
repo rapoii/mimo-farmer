@@ -124,17 +124,6 @@ async def solve_text_captcha(page, max_retries: int = 0) -> bool:
                 await asyncio.sleep(1)
                 continue
 
-            # Save debug image for inspection
-            try:
-                debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'debug')
-                os.makedirs(debug_dir, exist_ok=True)
-                debug_path = os.path.join(debug_dir, f'captcha_{attempt}.png')
-                with open(debug_path, 'wb') as f:
-                    f.write(img_bytes)
-                print(f"  [captcha] Debug image saved: {debug_path} ({len(img_bytes)} bytes)")
-            except Exception:
-                pass
-
             # Preprocess image for better OCR
             try:
                 from PIL import Image
