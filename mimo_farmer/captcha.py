@@ -93,70 +93,261 @@ async def detect_xiaomi_captcha(page) -> bool:
 
 
 async def solve_text_captcha(page, max_retries: int = 3) -> bool:
-    """Solve Xiaomi's custom text CAPTCHA — MANUAL mode.
+    """Solve Xiaomi's custom text CAPTCHA — auto ddddocr + manual fallback.
 
-    Instead of auto-OCR (ddddocr), we:
-    1. Tell user to solve it manually in the browser
-    2. Poll until popup disappears OR user presses Enter
+    Flow:
+    1. Try ddddocr auto-solve (up to max_retries attempts)
+       - Screenshot CAPTCHA image → OCR → type result → click Submit
+       - If popup closes → success
+       - If still showing → retry (image changes each time)
+    2. If all auto attempts fail → fallback to manual solve
 
     Returns True if solved, False otherwise.
     """
+    # Try auto-solve with ddddocr first
+    try:
+        import ddddocr
+        ocr = ddddocr.DdddOcr(show_ad=False)
+        print("  [captcha] ddddocr loaded — trying auto-solve...")
+
+        for attempt in range(1, max_retries + 1):
+            # Check if popup still there
+            if not await detect_xiaomi_captcha(page):
+                print("  [captcha] Popup already closed — no CAPTCHA to solve")
+                return True
+
+            # Extract CAPTCHA image bytes
+            img_bytes = await _extract_captcha_image(page)
+            if not img_bytes:
+                print(f"  [captcha] Could not extract CAPTCHA image (attempt {attempt})")
+                await asyncio.sleep(1)
+                continue
+
+            # OCR
+            result = ocr.classification(img_bytes)
+            result = result.strip()
+
+            if not result or len(result) < 2:
+                print(f"  [captcha] OCR returned empty/short: '{result}' (attempt {attempt})")
+                # Click reload/refresh if available
+                await _click_captcha_reload(page)
+                await asyncio.sleep(1)
+                continue
+
+            print(f"  [captcha] ddddocr result: '{result}' (attempt {attempt}/{max_retries})")
+
+            # Type result into input field
+            typed = await _type_captcha_answer(page, result)
+            if not typed:
+                print(f"  [captcha] Could not find input field (attempt {attempt})")
+                continue
+
+            # Click Submit
+            submitted = await _click_captcha_submit(page)
+            if not submitted:
+                print(f"  [captcha] Could not click Submit (attempt {attempt})")
+                continue
+
+            # Wait and check if solved
+            await asyncio.sleep(2)
+            if not await detect_xiaomi_captcha(page):
+                print(f"  [captcha] ✅ Auto-solved with ddddocr! ('{result}')")
+                return True
+
+            print(f"  [captcha] Wrong answer — retrying...")
+            await asyncio.sleep(1)
+
+        print(f"  [captcha] ddddocr failed after {max_retries} attempts — falling back to manual")
+
+    except ImportError:
+        print("  [captcha] ddddocr not available — using manual solve")
+    except Exception as e:
+        print(f"  [captcha] ddddocr error: {e} — falling back to manual")
+
+    # Fallback: manual solve
+    return await _solve_text_captcha_manual(page)
+
+
+async def _extract_captcha_image(page) -> bytes | None:
+    """Extract CAPTCHA image bytes from the Xiaomi verification popup.
+
+    Tries multiple strategies:
+    1. Find img with captcha/verify src near verification popup
+    2. Find small img (20-400px) in a dialog/popup context
+    3. Find canvas element with captcha content
+
+    Returns raw image bytes or None.
+    """
+    try:
+        # Strategy 1: Find img with captcha-related attributes
+        img_bytes = await page.evaluate("""
+            (() => {
+                const imgs = document.querySelectorAll('img');
+                for (const img of imgs) {
+                    const src = img.src || '';
+                    const w = img.naturalWidth || img.width;
+                    const h = img.naturalHeight || img.height;
+                    // CAPTCHA images: small, captcha-related src
+                    if (w > 30 && w < 400 && h > 15 && h < 200) {
+                        if (src.includes('captcha') || src.includes('verify') || src.includes('data:image')) {
+                            return src;
+                        }
+                    }
+                }
+                // Strategy 2: Any small image in a dialog/popup
+                const dialogs = document.querySelectorAll('dialog, [role="dialog"], .ant-modal, .popup, [class*="captcha"], [class*="verify"]');
+                for (const d of dialogs) {
+                    const dimgs = d.querySelectorAll('img');
+                    for (const img of dimgs) {
+                        const w = img.naturalWidth || img.width;
+                        if (w > 30 && w < 400) {
+                            return img.src;
+                        }
+                    }
+                }
+                // Strategy 3: Any base64 image that looks like captcha
+                for (const img of imgs) {
+                    const src = img.src || '';
+                    if (src.startsWith('data:image') && src.length > 500) {
+                        const w = img.naturalWidth || img.width;
+                        if (w > 30 && w < 400) return src;
+                    }
+                }
+                return null;
+            })()
+        """)
+
+        if not img_bytes:
+            # Fallback: screenshot the captcha image element directly
+            for selector in [
+                'img[src*="captcha"]',
+                'img[src*="verify"]',
+                '[class*="captcha"] img',
+                '[class*="verify"] img',
+                'dialog img',
+                '[role="dialog"] img',
+            ]:
+                try:
+                    el = page.locator(selector).first
+                    if await el.count() > 0:
+                        screenshot_bytes = await el.screenshot()
+                        if screenshot_bytes and len(screenshot_bytes) > 100:
+                            return screenshot_bytes
+                except Exception:
+                    continue
+            return None
+
+        # Convert data URL or URL to bytes
+        if img_bytes.startswith('data:image'):
+            import base64
+            _, b64data = img_bytes.split(',', 1)
+            return base64.b64decode(b64data)
+        else:
+            # It's a URL — fetch it via page context
+            fetched = await page.evaluate("""
+                async (url) => {
+                    try {
+                        const resp = await fetch(url);
+                        const blob = await resp.blob();
+                        return new Promise(r => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => r(reader.result);
+                            reader.readAsDataURL(blob);
+                        });
+                    } catch(e) { return null; }
+                }
+            """, img_bytes)
+            if fetched and 'base64,' in fetched:
+                import base64
+                return base64.b64decode(fetched.split('base64,')[1])
+    except Exception as e:
+        print(f"  [captcha] Image extraction error: {e}")
+
+    return None
+
+
+async def _type_captcha_answer(page, text: str) -> bool:
+    """Type CAPTCHA answer into the input field."""
+    try:
+        # Look for input near verification code text
+        for selector in [
+            'input[placeholder*="code" i]',
+            'input[placeholder*="captcha" i]',
+            'input[placeholder*="verification" i]',
+            'dialog input[type="text"]',
+            '[role="dialog"] input[type="text"]',
+            '[class*="captcha"] input',
+            '[class*="verify"] input',
+        ]:
+            el = page.locator(selector).first
+            if await el.count() > 0:
+                await el.fill('')
+                await asyncio.sleep(0.2)
+                await el.type(text, delay=80)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+async def _click_captcha_submit(page) -> bool:
+    """Click Submit button in CAPTCHA popup."""
+    try:
+        for selector in [
+            'button:has-text("Submit")',
+            'button:has-text("Confirm")',
+            'button:has-text("Verify")',
+            'dialog button[type="submit"]',
+            '[role="dialog"] button:has-text("Submit")',
+        ]:
+            el = page.locator(selector).first
+            if await el.count() > 0:
+                await el.click(timeout=3000)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+async def _click_captcha_reload(page) -> bool:
+    """Click reload/refresh button to get new CAPTCHA image."""
+    try:
+        for selector in [
+            'button:has-text("Refresh")',
+            'button:has-text("Reload")',
+            '[class*="captcha"] button:has-text("refresh" i)',
+            'button[aria-label*="refresh" i]',
+            'button[aria-label*="reload" i]',
+        ]:
+            el = page.locator(selector).first
+            if await el.count() > 0:
+                await el.click(timeout=2000)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+async def _solve_text_captcha_manual(page) -> bool:
+    """Fallback: manual CAPTCHA solving by user."""
     print()
     print("  " + "=" * 50)
-    print("  [captcha] XIAOMI TEXT CAPTCHA DETECTED")
+    print("  [captcha] XIAOMI TEXT CAPTCHA — MANUAL SOLVE")
     print("  [captcha] Please solve the CAPTCHA in the browser window.")
     print("  [captcha] Type the code & click Submit yourself.")
     print("  [captcha]")
-    print("  [captcha] Waiting for popup to close automatically...")
-    print("  [captcha] (or press ENTER here to confirm you're done)")
+    print("  [captcha] Waiting for popup to close...")
     print("  " + "=" * 50)
     print()
 
-    # Poll: check every 2s if popup disappeared, timeout after 120s
-    POLL_INTERVAL = 2
     MAX_WAIT = 120
-    IS_WINDOWS = __import__('sys').platform == 'win32'
-
     elapsed = 0
     while elapsed < MAX_WAIT:
-        # Check if popup gone
-        still_there = await detect_xiaomi_captcha(page)
-        if not still_there:
+        if not await detect_xiaomi_captcha(page):
             print("  [captcha] Popup closed — CAPTCHA solved!")
             return True
-
-        # Non-blocking stdin check
-        if IS_WINDOWS:
-            import msvcrt
-            if msvcrt.kbhit():
-                msvcrt.getch()  # consume the keypress
-                # Re-check popup after user says done
-                await asyncio.sleep(1)
-                still_there = await detect_xiaomi_captcha(page)
-                if not still_there:
-                    print("  [captcha] Popup closed — CAPTCHA solved!")
-                    return True
-                else:
-                    print("  [captcha] Popup still visible. Continue solving...")
-        else:
-            # Unix: non-blocking stdin read
-            try:
-                ready, _, _ = select.select([sys.stdin], [], [], 0)
-                if ready:
-                    sys.stdin.readline()
-                    await asyncio.sleep(1)
-                    still_there = await detect_xiaomi_captcha(page)
-                    if not still_there:
-                        print("  [captcha] Popup closed — CAPTCHA solved!")
-                        return True
-                    else:
-                        print("  [captcha] Popup still visible. Continue solving...")
-            except Exception:
-                pass
-
-        await asyncio.sleep(POLL_INTERVAL)
-        elapsed += POLL_INTERVAL
-        # Progress indicator every 10s
+        await asyncio.sleep(2)
+        elapsed += 2
         if elapsed % 10 == 0:
             print(f"  [captcha] Still waiting... ({elapsed}s / {MAX_WAIT}s)")
 
