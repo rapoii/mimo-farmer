@@ -284,61 +284,94 @@ async def handle_terms_dialog(page, fast: bool = False):
         return False
 
 
-async def enter_referral(page, referral_code: str, fast: bool = False) -> bool:
-    """Enter referral code. Returns True only if bind was attempted successfully.
+async def enter_referral(page, referral_code: str, fast: bool = False) -> str:
+    """Enter referral code. Returns status string.
 
-    Primary: UI flow. Fallback: authenticated API `/api/v1/invitation/bind`.
+    Returns: "ok" if bound, "not_found" if code invalid, "expired" if expired,
+    "used" if already used, "error" on other failures.
+    Retries up to 3 times if "not found" error appears.
     """
+    MAX_RETRIES = 3
     print(f"  Entering referral: {referral_code}")
-    referral_submitted = False
-    try:
-        # Wait for SPA/sidebar to render
-        await asyncio.sleep(3)
 
-        # Primary UI selectors: button OR text-containing clickable nodes
-        invite_candidates = [
-            page.get_by_role('button', name=re.compile('invite|referral|Enter invite', re.I)),
-            page.locator('text=/Enter invite code/i'),
-            page.locator('text=/invite code/i'),
-        ]
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            await asyncio.sleep(3)
 
-        clicked = False
-        for candidate in invite_candidates:
-            try:
-                count = await candidate.count()
-                if count > 0:
-                    await candidate.first.click(force=True, timeout=5000)
-                    await asyncio.sleep(1.5)
-                    clicked = True
-                    break
-            except Exception:
-                continue
+            invite_candidates = [
+                page.get_by_role('button', name=re.compile('invite|referral|Enter invite', re.I)),
+                page.locator('text=/Enter invite code/i'),
+                page.locator('text=/invite code/i'),
+            ]
 
-        if clicked:
-            otp_fields = page.get_by_role(
-                'textbox', name=re.compile('OTP Input|Input', re.I)
-            )
-            count = await otp_fields.count()
+            clicked = False
+            for candidate in invite_candidates:
+                try:
+                    count = await candidate.count()
+                    if count > 0:
+                        await candidate.first.click(force=True, timeout=5000)
+                        await asyncio.sleep(1.5)
+                        clicked = True
+                        break
+                except Exception:
+                    continue
 
-            if count >= 6:
-                for i, char in enumerate(referral_code):
-                    await otp_fields.nth(i).fill(char)
-                    await human_delay(50, 150, fast)
-                await human_delay(300, 600, fast)
+            if clicked:
+                otp_fields = page.get_by_role(
+                    'textbox', name=re.compile('OTP Input|Input', re.I)
+                )
+                count = await otp_fields.count()
 
-                await page.get_by_role(
-                    'button', name=re.compile('Redeem|Submit|Bind', re.I)
-                ).click()
-                await asyncio.sleep(2)
-                print("  Referral submitted via UI!")
-                referral_submitted = True
+                if count >= 6:
+                    for i, char in enumerate(referral_code):
+                        await otp_fields.nth(i).fill(char)
+                        await human_delay(50, 150, fast)
+                    await human_delay(300, 600, fast)
+
+                    await page.get_by_role(
+                        'button', name=re.compile('Redeem|Submit|Bind', re.I)
+                    ).click()
+                    await asyncio.sleep(3)
+
+                    # Check for error message after clicking Redeem
+                    error_text = await page.evaluate("""
+                        (() => {
+                            const body = document.body?.innerText || '';
+                            const lower = body.toLowerCase();
+                            if (lower.includes('not found')) return 'not_found';
+                            if (lower.includes('not valid')) return 'not_valid';
+                            if (lower.includes('expired')) return 'expired';
+                            if (lower.includes('already been used') || lower.includes('already used')) return 'used';
+                            if (lower.includes('please check and try again')) return 'retry';
+                            return '';
+                        })()
+                    """)
+
+                    if error_text in ('not_found', 'not_valid', 'retry'):
+                        if attempt < MAX_RETRIES:
+                            print(f"  [!] Referral error: {error_text} — retrying ({attempt}/{MAX_RETRIES})...")
+                            try:
+                                close_btn = page.locator('[class*="close"], [aria-label="close"]').first
+                                await close_btn.click(timeout=2000)
+                            except Exception:
+                                await page.keyboard.press('Escape')
+                            await asyncio.sleep(5)
+                            continue
+                        else:
+                            print(f"  [!] Referral failed after {MAX_RETRIES} attempts: {error_text}")
+                            return "not_found"
+                    elif error_text in ('expired', 'used'):
+                        print(f"  [!] Referral {error_text} — cannot retry")
+                        return error_text
+                    else:
+                        print("  Referral submitted via UI!")
+                        return "ok"
+                else:
+                    print(f"  [!] Expected 6 OTP fields, found {count}")
             else:
-                print(f"  [!] Expected 6 OTP fields, found {count}")
-        else:
-            print("  [!] Invite UI not found, trying API fallback...")
+                print("  [!] Invite UI not found, trying API fallback...")
 
-        # Fallback API bind if UI failed
-        if not referral_submitted:
+            # Fallback API bind
             api_result = await page.evaluate(
                 """
                 async (code) => {
@@ -359,12 +392,19 @@ async def enter_referral(page, referral_code: str, fast: bool = False) -> bool:
                 referral_code,
             )
             print(f"  API bind result: {api_result}")
-            referral_submitted = bool(api_result and api_result.get('ok'))
+            if api_result and api_result.get('ok'):
+                return "ok"
+            return "error"
 
-        return referral_submitted
-    except Exception as e:
-        print(f"  [!] Referral error: {e}")
-        return False
+        except Exception as e:
+            print(f"  [!] Referral error: {e}")
+            if attempt < MAX_RETRIES:
+                print(f"  [!] Retrying ({attempt}/{MAX_RETRIES})...")
+                await asyncio.sleep(5)
+                continue
+            return "error"
+
+    return "error"
 
 
 async def extract_own_referral_code(page) -> str | None:
@@ -927,6 +967,7 @@ async def create_account(
         password = 'Mm' + secrets.token_urlsafe(6) + '!9'
     timer = Timer()
     risk_control = False
+    referral_not_found = False  # Set by enter_referral if code not found
 
     # Fetch available domains from generator.email (once per session)
     available_domains = get_available_domains()
@@ -1422,7 +1463,9 @@ async def create_account(
             timer.phase("Referral extraction")
         else:
             print("[9] Entering referral code...")
-            referral_ok = await enter_referral(page, referral_code, fast)
+            referral_status = await enter_referral(page, referral_code, fast)
+            referral_ok = (referral_status == "ok")
+            referral_not_found = (referral_status == "not_found")
             await handle_dialogs(page, fast)
             timer.phase("Referral entry")
 
@@ -1474,6 +1517,7 @@ async def create_account(
             "referral": referral_code,
             "api_key": api_key,
             "risk_control": risk_control,
+            "referral_failed": referral_not_found,
             "own_referral": own_referral,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
             "method": "mimo-farmer",

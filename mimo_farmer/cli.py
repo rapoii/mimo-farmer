@@ -508,8 +508,12 @@ def _run_siklus(siklus_count: int, fast: bool) -> int:
 
             # Step 2: Create 5 child accounts using main's referral
             children_success = 0
+            child_num_counter = (s - 1) * 6 + 2  # First child number
+            MAX_REFERRAL_RETRIES = 2  # Max replacement attempts per slot
+
             for c in range(1, CHILDREN_PER_SIKLUS + 1):
-                child_num = (s - 1) * 6 + 1 + c
+                child_num = child_num_counter
+                child_num_counter += 1
                 print(f"\n  [SIKLUS {s}] Child {c}/{CHILDREN_PER_SIKLUS} (account #{child_num})...")
 
                 # Cooldown between children
@@ -518,49 +522,83 @@ def _run_siklus(siklus_count: int, fast: bool) -> int:
                     print(f"\n  ⏳ Cooldown {cooldown}s between children...")
                     _time.sleep(cooldown)
 
-                try:
-                    child_result = asyncio.run(create_account(
-                        referral_code=main_referral,
-                        fast=fast,
-                        account_num=child_num,
-                        preferred_domain=current_safe_domain,
-                    ))
-                except Exception as e:
-                    print(f"  [!] Child {c} error: {e}")
-                    total_fail += 1
-                    continue
+                slot_done = False
+                for retry in range(MAX_REFERRAL_RETRIES + 1):
+                    if retry > 0:
+                        print(f"\n  [!] Creating replacement account for slot {c} (retry {retry}/{MAX_REFERRAL_RETRIES})...")
+                        child_num = child_num_counter
+                        child_num_counter += 1
+                        cooldown = random.randint(1, 5)
+                        _time.sleep(cooldown)
 
-                if child_result is None:
-                    print(f"  [!] Child {c} failed.")
-                    total_fail += 1
-                    continue
+                    try:
+                        child_result = asyncio.run(create_account(
+                            referral_code=main_referral,
+                            fast=fast,
+                            account_num=child_num,
+                            preferred_domain=current_safe_domain,
+                        ))
+                    except Exception as e:
+                        print(f"  [!] Child {c} error: {e}")
+                        break
 
-                # Update rolling safe domain from this child's actual domain
-                child_email = child_result.get('email', '')
-                if '@' in child_email:
-                    child_domain = child_email.split('@')[1]
-                    if child_domain != current_safe_domain:
-                        print(f"  🔄 Domain switched: {current_safe_domain} → {child_domain}")
-                        current_safe_domain = child_domain
+                    if child_result is None:
+                        print(f"  [!] Child {c} failed.")
+                        break
 
-                if child_result.get('risk_control'):
-                    remaining = CHILDREN_PER_SIKLUS - c
-                    print(f"  [!] RISK CONTROL on child {c}!")
-                    print(f"  [!] Main referral '{main_referral}' may be blocked.")
-                    print(f"  [!] Stopping children for siklus {s}. ({remaining} children skipped)")
-                    total_fail += 1 + remaining  # this child + remaining skipped
+                    # Update rolling safe domain
+                    child_email = child_result.get('email', '')
+                    if '@' in child_email:
+                        child_domain = child_email.split('@')[1]
+                        if child_domain != current_safe_domain:
+                            print(f"  🔄 Domain switched: {current_safe_domain} → {child_domain}")
+                            current_safe_domain = child_domain
+
+                    # Check if referral was "not found" — need replacement
+                    if child_result.get('referral_failed'):
+                        print(f"  [!] Referral code not found — account created but no referral bonus")
+                        if retry < MAX_REFERRAL_RETRIES:
+                            print(f"  [!] Will create replacement account...")
+                            # Still save this account (it exists, just no bonus)
+                            total_success += 1
+                            all_results.append(child_result)
+                            continue
+                        else:
+                            print(f"  [!] Max retries reached for slot {c}")
+                            total_success += 1
+                            all_results.append(child_result)
+                            slot_done = True
+                            break
+
+                    if child_result.get('risk_control'):
+                        remaining = CHILDREN_PER_SIKLUS - c
+                        print(f"  [!] RISK CONTROL on child {c}!")
+                        print(f"  [!] Main referral '{main_referral}' may be blocked.")
+                        print(f"  [!] Stopping children for siklus {s}. ({remaining} children skipped)")
+                        total_fail += 1 + remaining
+                        slot_done = True  # Break outer loop too
+                        break
+
+                    # Success
+                    total_success += 1
+                    children_success += 1
+                    all_results.append(child_result)
+                    child_email_display = child_result.get('email', 'N/A')
+                    child_balance = child_result.get('balance', 'N/A')
+                    print(f"  ✅ Child {c} created! Email: {child_email_display} | Balance: {child_balance}")
+                    slot_done = True
                     break
 
-                total_success += 1
-                children_success += 1
-                all_results.append(child_result)
-                child_email = child_result.get('email', 'N/A')
-                child_balance = child_result.get('balance', 'N/A')
-                print(f"  ✅ Child {c} created! Email: {child_email} | Balance: {child_balance}")
+                if not slot_done and not child_result.get('risk_control'):
+                    total_fail += 1
 
-                # IP rotation check after each child
+                # IP rotation check
                 if total_success % 5 == 0:
                     _prompt_ip_rotation(total_success)
+
+                # Check if risk_control broke the outer loop
+                if child_result and child_result.get('risk_control'):
+                    break
 
             last_siklus = s
             print(f"\n  Siklus {s} done: 1 main + {children_success}/{CHILDREN_PER_SIKLUS} children")

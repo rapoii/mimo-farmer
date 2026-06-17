@@ -99,8 +99,20 @@ async def _click_email_and_get_code(email_page, skip_codes: set, inbox_url: str)
                 await item.click(timeout=3000)
                 await asyncio.sleep(3)
 
-                # Extract codes from current page (body now shows email content)
-                body_text = await email_page.evaluate("document.body?.innerText || ''")
+                # Extract codes ONLY from the email body container, not full page
+                # Try to scope to the email content area first
+                body_text = await email_page.evaluate("""
+                    (() => {
+                        // Try to get just the email body content (not inbox list)
+                        const body = document.querySelector('.email-body, .mail-body, #email-body, .msg-body');
+                        if (body) return body.innerText || '';
+                        // Fallback: get the main content area (skip navigation/sidebar)
+                        const main = document.querySelector('.wrap, .layout, main, .content');
+                        if (main) return main.innerText || '';
+                        // Last resort: full page
+                        return document.body?.innerText || '';
+                    })()
+                """)
                 all_codes = re.findall(r'\b(\d{6})\b', body_text)
                 print(f"  [otp] Codes found on page: {all_codes}")
 
@@ -112,9 +124,30 @@ async def _click_email_and_get_code(email_page, skip_codes: set, inbox_url: str)
 
                 print(f"  [otp] No new codes in this email")
 
-                # Go back to inbox
+                # Go back to inbox — MUST reload to reset page state
                 await email_page.goto(inbox_url, wait_until='domcontentloaded', timeout=60000)
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
+
+                # Re-fetch email items after navigation (DOM was replaced)
+                items = email_page.locator('#email-table a.list-group-item')
+                new_count = await items.count()
+                if new_count == 0:
+                    items = email_page.locator('a.list-group-item')
+                    new_count = await items.count()
+                # Update outer count for the loop
+                count = new_count
+
+            except Exception as e:
+                print(f"  [otp] Click error: {e}")
+                # Page might have navigated — try to recover
+                try:
+                    await email_page.goto(inbox_url, wait_until='domcontentloaded', timeout=60000)
+                    await asyncio.sleep(3)
+                    items = email_page.locator('#email-table a.list-group-item')
+                    count = await items.count()
+                except Exception:
+                    pass
+                continue
 
                 # Re-get items after navigation
                 items = email_page.locator('#email-table a.list-group-item')
