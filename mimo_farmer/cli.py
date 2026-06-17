@@ -257,7 +257,7 @@ def _run_sequential(count: int, referral: str, fast: bool) -> int:
     for i in range(count):
         # Random cooldown between accounts (anti-detection)
         if i > 0:
-            cooldown = random.randint(30, 60)
+            cooldown = random.randint(1, 10)
             print(f"\n  ⏳ Cooldown {cooldown}s between accounts (anti-detection)...")
             _time.sleep(cooldown)
 
@@ -333,7 +333,7 @@ def _run_continuous(referral: str, fast: bool) -> int:
         while True:
             # Random cooldown between accounts (anti-detection)
             if account_num > 0:
-                cooldown = random.randint(30, 60)
+                cooldown = random.randint(1, 10)
                 print(f"\n  ⏳ Cooldown {cooldown}s between accounts (anti-detection)...")
                 time.sleep(cooldown)
 
@@ -442,7 +442,7 @@ def _run_siklus(siklus_count: int, fast: bool) -> int:
         for s in range(1, siklus_count + 1):
             # Cooldown between siklus cycles (not before first)
             if s > 1:
-                cooldown = random.randint(30, 60)
+                cooldown = random.randint(1, 10)
                 print(f"\n  ⏳ Cooldown {cooldown}s between siklus cycles...")
                 _time.sleep(cooldown)
 
@@ -502,7 +502,7 @@ def _run_siklus(siklus_count: int, fast: bool) -> int:
                 _prompt_ip_rotation(total_success)
 
             # Cooldown before children
-            cooldown = random.randint(30, 60)
+            cooldown = random.randint(1, 10)
             print(f"\n  ⏳ Cooldown {cooldown}s before creating children...")
             _time.sleep(cooldown)
 
@@ -514,7 +514,7 @@ def _run_siklus(siklus_count: int, fast: bool) -> int:
 
                 # Cooldown between children
                 if c > 1:
-                    cooldown = random.randint(30, 60)
+                    cooldown = random.randint(1, 10)
                     print(f"\n  ⏳ Cooldown {cooldown}s between children...")
                     _time.sleep(cooldown)
 
