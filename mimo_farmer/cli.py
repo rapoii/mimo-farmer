@@ -1061,16 +1061,20 @@ def _run_parallel(count: int, referral: str, captcha_mode: str, parallel: int) -
 
 
 def _save_combined(results: list, referral: str) -> None:
-    """Save all credentials in combined format.
+    """Save all credentials in combined format with email links.
 
     Format:
-    [1]
-    Mail: email@banri.xyz
-    Pw: papoi123
+    [1] — Main
+    Mail: email@domain.com
+    Link: https://generator.email/email@domain.com
+    Pw: password
     Api-Key: sk-xxxxxxxxxx
 
     [2]
-    ...
+    Mail: email2@domain.com
+    Link: https://generator.email/email2@domain.com
+    Pw: password
+    Api-Key: sk-xxxxxxxxxx
     """
     from mimo_farmer.config import ACCOUNTS_DIR
 
@@ -1088,7 +1092,12 @@ def _save_combined(results: list, referral: str) -> None:
         # Validate: warn if key is masked
         if api_key and ('*' in api_key or '...' in api_key):
             print(f"  [!] Account {i}: API key is MASKED ({api_key[:15]}...) — re-run to get full key")
-        lines.append(f"[{i}]")
+        
+        # Check if this is a main account (has own_referral, no referral used)
+        is_main = bool(creds.get('own_referral')) and not creds.get('referral')
+        header = f"[{i}] — Main" if is_main else f"[{i}]"
+        
+        lines.append(header)
         lines.append(f"Mail: {creds['email']}")
         lines.append(f"Link: https://generator.email/{creds['email']}")
         lines.append(f"Pw: {creds['password']}")
