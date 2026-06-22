@@ -950,6 +950,7 @@ def _run_target_balance(target: float, captcha_mode: str, ip_rotate: str, cdp_ur
 
             # Success — save account
             consecutive_not_found = 0
+            result['_is_main'] = is_main
             total_bonus += gift
             saved_accounts.append(result)
 
@@ -1086,6 +1087,12 @@ def _save_combined(results: list, referral: str) -> None:
     ts = time.strftime("%Y%m%d_%H%M%S")
     combined_path = os.path.join(ACCOUNTS_DIR, f"batch_{ts}.txt")
 
+    # Estimate main balances: main signup bonus + $2 per child using that main referral.
+    child_count_by_ref = {}
+    for creds in valid:
+        if not creds.get('_is_main') and creds.get('referral'):
+            child_count_by_ref[creds['referral']] = child_count_by_ref.get(creds['referral'], 0) + 1
+
     lines = []
     for i, creds in enumerate(valid, 1):
         api_key = creds.get('api_key', 'N/A')
@@ -1093,15 +1100,23 @@ def _save_combined(results: list, referral: str) -> None:
         if api_key and ('*' in api_key or '...' in api_key):
             print(f"  [!] Account {i}: API key is MASKED ({api_key[:15]}...) — re-run to get full key")
         
-        # Check if this is a main account (has own_referral, no referral used)
-        is_main = bool(creds.get('own_referral')) and not creds.get('referral')
+        is_main = bool(creds.get('_is_main'))
         header = f"[{i}] — Main" if is_main else f"[{i}]"
+
+        balance = creds.get('balance', '$0.00')
+        if is_main:
+            try:
+                base = float(str(balance).replace('$', '').strip() or 0)
+            except ValueError:
+                base = float(creds.get('gift_balance') or 0)
+            balance = f"${base + 2.0 * child_count_by_ref.get(creds.get('own_referral'), 0):.2f}"
         
         lines.append(header)
         lines.append(f"Mail: {creds['email']}")
         lines.append(f"Link: https://generator.email/{creds['email']}")
         lines.append(f"Pw: {creds['password']}")
         lines.append(f"Api-Key: {api_key}")
+        lines.append(f"Balance: {balance}")
         lines.append("")
 
     with open(combined_path, "w") as f:

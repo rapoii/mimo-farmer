@@ -301,18 +301,21 @@ Mail: 4cniy0m9q8@rexornge.net
 Link: https://generator.email/4cniy0m9q8@rexornge.net
 Pw: MmaTUm11MU!9
 Api-Key: sk-s2nnxo2labcdef1234567890abcdefghijklmnopqrstuvwxyz
+Balance: $4.72
 
 [2]
 Mail: h7vb2k4@rexornge.net
 Link: https://generator.email/h7vb2k4@rexornge.net
 Pw: MmKp3Xnq7!9
 Api-Key: sk-t98abcd1234567890abcdefghijklmnopqrstuvwxyz
+Balance: $2.72
 
 [3]
 Mail: xyz@domain.com
 Link: https://generator.email/xyz@domain.com
 Pw: MmAbc123!9
 Api-Key: sk-xyz1234567890abcdefghijklmnopqrstuvwxyz
+Balance: $2.72
 ```
 
 > **Note:** API keys are only saved to local files — they are never transmitted anywhere.
