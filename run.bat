@@ -1,6 +1,4 @@
-@echo off
-cd /d "C:\Users\rafi\mimo-farmer"
-set "PYTHONPATH="
-set "PYTHONHOME="
-"C:\Users\rafi\AppData\Local\Programs\Python\Python312\python.exe" -m mimo_farmer create --referral DMRFJP --continuous --fast
-pause
+@echo off
+cd /d "%~dp0"
+python -m mimo_farmer create --referral ABC123 --count 1
+pause

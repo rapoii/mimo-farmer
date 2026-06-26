@@ -15,10 +15,11 @@ import time
 import re
 import socket
 import requests
+from pathlib import Path
 
 # Auto-detect ADB path
 ADB_PATHS = [
-    "C:\\Users\\rafi\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+    str(Path.home() / "AppData" / "Local" / "Android" / "Sdk" / "platform-tools" / "adb.exe"),
     "adb",  # fallback to PATH
 ]
 

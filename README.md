@@ -23,10 +23,10 @@ python -m mimo_farmer create --referral CODE --count N
 - Google Chrome / supported browser environment.
 - Project dependencies installed.
 
-Rafi's local Python path:
+Example Python command:
 
 ```powershell
-C:\Users\rafi\AppData\Local\Programs\Python\Python312\python.exe
+python
 ```
 
 ## Installation
