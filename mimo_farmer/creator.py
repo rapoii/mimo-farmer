@@ -1604,11 +1604,12 @@ async def create_account(
         verify_handled = await handle_identity_verification(page, user, domain, captcha_mode, first_otp=code)
         if verify_handled:
             print("  Identity verification handled!")
-            # After verification, navigate to MiMo platform to establish session
+            # After verification, navigate to MiMo platform to establish session.
+            # Let the dedicated terms step handle the popup; generic dialog handling here can stall.
             print("  Establishing MiMo platform session...")
             await page.goto("https://platform.xiaomimimo.com/", wait_until='domcontentloaded')
-            await asyncio.sleep(2)
-            await handle_dialogs(page, captcha_mode)
+            await asyncio.sleep(1)
+            print("  MiMo platform session established")
             timer.phase("Identity verification")
         else:
             print("  No identity verification needed, continuing...")
